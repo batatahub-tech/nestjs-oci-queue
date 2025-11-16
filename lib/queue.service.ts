@@ -444,8 +444,7 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
       }
     }
 
-    const isEmpty = !containerToUse || 
-      (containerToUse.size !== undefined && containerToUse.size === 0);
+    const isEmpty = !containerToUse || (containerToUse.size !== undefined && containerToUse.size === 0);
 
     if (isEmpty && this.moduleRef) {
       const commonHandlerNames = ['MessageHandler'];
