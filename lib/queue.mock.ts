@@ -1,5 +1,6 @@
 import type { QueueClient } from 'oci-queue';
-import * as requests from 'oci-queue/lib/request';
+import type * as requests from 'oci-queue/lib/request';
+import type * as responses from 'oci-queue/lib/response';
 
 interface MockMessage {
   id: string;
@@ -19,9 +20,7 @@ export class MockQueueClient implements Pick<QueueClient, 'getMessages' | 'putMe
   private receiptCounter = 0;
   private messageIdCounter = 0;
 
-  constructor() {}
-
-  async getMessages(request: requests.GetMessagesRequest): Promise<any> {
+  async getMessages(request: requests.GetMessagesRequest): Promise<responses.GetMessagesResponse> {
     const queueId = request.queueId || '';
     const limit = request.limit || 10;
     const visibilityInSeconds = request.visibilityInSeconds || 30;
@@ -43,17 +42,22 @@ export class MockQueueClient implements Pick<QueueClient, 'getMessages' | 'putMe
         receipt: msg.receipt,
         content: msg.content,
         metadata: msg.metadata,
-      };
+        deliveryCount: 1,
+        visibleAfter: new Date(msg.visibleAt),
+        expireAfter: new Date(msg.visibleAt + visibilityInSeconds * 1000),
+        createdAt: new Date(now),
+      } as unknown as responses.GetMessagesResponse['getMessages']['messages'][0];
     });
 
     return {
       getMessages: {
         messages: messagesWithReceipts,
       },
+      opcRequestId: 'mock-request-id',
     };
   }
 
-  async putMessages(request: requests.PutMessagesRequest): Promise<any> {
+  async putMessages(request: requests.PutMessagesRequest): Promise<responses.PutMessagesResponse> {
     const queueId = request.queueId || '';
     const messages = request.putMessagesDetails?.messages || [];
 
@@ -67,7 +71,10 @@ export class MockQueueClient implements Pick<QueueClient, 'getMessages' | 'putMe
 
     const queueMessages = this.messages.get(queueId);
     if (!queueMessages) {
-      return { entries: [] };
+      return {
+        putMessages: { entries: [] },
+        opcRequestId: 'mock-request-id',
+      } as unknown as responses.PutMessagesResponse;
     }
 
     const entries: Array<{ id: string; receipt: string }> = [];
@@ -100,16 +107,19 @@ export class MockQueueClient implements Pick<QueueClient, 'getMessages' | 'putMe
     });
 
     return {
-      entries,
-    };
+      putMessages: {
+        entries: entries.map((e) => ({ id: e.id, receipt: e.receipt })),
+      },
+      opcRequestId: 'mock-request-id',
+    } as unknown as responses.PutMessagesResponse;
   }
 
-  async deleteMessage(request: requests.DeleteMessageRequest): Promise<any> {
+  async deleteMessage(request: requests.DeleteMessageRequest): Promise<responses.DeleteMessageResponse> {
     const queueId = request.queueId || '';
     const receipt = request.messageReceipt || '';
 
     if (!queueId || !receipt) {
-      return {};
+      return { opcRequestId: 'mock-request-id' };
     }
 
     const messageId = this.receipts.get(receipt);
@@ -132,7 +142,7 @@ export class MockQueueClient implements Pick<QueueClient, 'getMessages' | 'putMe
       this.receipts.delete(receipt);
     }
 
-    return {};
+    return { opcRequestId: 'mock-request-id' };
   }
 
   clearQueue(queueId: string): void {

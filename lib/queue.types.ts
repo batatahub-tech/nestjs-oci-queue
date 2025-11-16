@@ -1,4 +1,4 @@
-import type { LoggerService, ModuleMetadata, Type } from '@nestjs/common';
+import type { InjectionToken, LoggerService, ModuleMetadata, Type } from '@nestjs/common';
 import type { QueueClient } from 'oci-queue';
 
 export type QueueName = string;
@@ -56,11 +56,11 @@ export interface QueueModuleOptionsFactory {
 export interface QueueModuleAsyncOptions extends Pick<ModuleMetadata, 'imports'> {
   useExisting?: Type<QueueModuleOptionsFactory>;
   useClass?: Type<QueueModuleOptionsFactory>;
-  useFactory?: (...args: any[]) => Promise<QueueOptions> | QueueOptions;
-  inject?: any[];
+  useFactory?: (...args: unknown[]) => Promise<QueueOptions> | QueueOptions;
+  inject?: InjectionToken[];
 }
 
-export interface Message<T = any> {
+export interface Message<T = unknown> {
   id?: string;
   body: T;
   delaySeconds?: number;

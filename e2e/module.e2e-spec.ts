@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Test, TestingModule } from '@nestjs/testing';
+import { Test, type TestingModule } from '@nestjs/testing';
 import { MockQueueClient, type OciQueueReceivedMessage, QueueModule, QueueService } from '../lib';
 import { QueueConsumerEventHandler, QueueMessageHandler } from '../lib/queue.decorators';
 
@@ -272,7 +272,10 @@ describe('QueueModule E2E', () => {
             expect(message.id).toBeDefined();
             expect(message.content).toBeDefined();
             const content = Buffer.from(message.content, 'base64').toString('utf-8');
-            expect(JSON.parse(content)).toStrictEqual({ dlq: true, test: 'dlq-message' });
+            expect(JSON.parse(content)).toStrictEqual({
+              dlq: true,
+              test: 'dlq-message',
+            });
             resolve();
           });
 

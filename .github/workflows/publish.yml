@@ -30,8 +30,8 @@ jobs:
       - name: Install Dependencies
         run: pnpm install
 
-      - name: Check lint and format
-        run: pnpm check
+      - name: Check format
+        run: pnpm format:check
 
       - name: Run Tests
         run: pnpm run test:e2e

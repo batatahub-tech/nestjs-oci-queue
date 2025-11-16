@@ -1,10 +1,11 @@
-import { DynamicModule, Module, Provider, Type } from '@nestjs/common';
-import { MetadataScanner, ModuleRef, ModulesContainer, Reflector } from '@nestjs/core';
+import { type DynamicModule, Module, type Provider, type Type } from '@nestjs/common';
+import { MetadataScanner, ModulesContainer, Reflector } from '@nestjs/core';
 import { QUEUE_OPTIONS } from './queue.constants';
 import { QueueService } from './queue.service';
-import { QueueModuleAsyncOptions, QueueModuleOptionsFactory, QueueOptions } from './queue.types';
+import type { QueueModuleAsyncOptions, QueueModuleOptionsFactory, QueueOptions } from './queue.types';
 
 @Module({})
+// biome-ignore lint/complexity/noStaticOnlyClass: NestJS module pattern requires static methods
 export class QueueModule {
   public static register(options: QueueOptions): DynamicModule {
     const queueOptions: Provider = {
@@ -26,7 +27,7 @@ export class QueueModule {
   }
 
   public static registerAsync(options: QueueModuleAsyncOptions): DynamicModule {
-    const asyncProviders = this.createAsyncProviders(options);
+    const asyncProviders = QueueModule.createAsyncProviders(options);
     const queueProvider: Provider = {
       provide: QueueService,
       useClass: QueueService,
@@ -43,11 +44,11 @@ export class QueueModule {
 
   private static createAsyncProviders(options: QueueModuleAsyncOptions): Provider[] {
     if (options.useExisting || options.useFactory) {
-      return [this.createAsyncOptionsProvider(options)];
+      return [QueueModule.createAsyncOptionsProvider(options)];
     }
     const useClass = options.useClass as Type<QueueModuleOptionsFactory>;
     return [
-      this.createAsyncOptionsProvider(options),
+      QueueModule.createAsyncOptionsProvider(options),
       {
         provide: useClass,
         useClass,

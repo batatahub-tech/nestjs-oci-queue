@@ -2,18 +2,19 @@ import {
   Inject,
   Injectable,
   Logger,
-  LoggerService,
-  OnApplicationBootstrap,
-  OnModuleDestroy,
-  OnModuleInit,
+  type LoggerService,
+  type OnApplicationBootstrap,
+  type OnModuleDestroy,
+  type OnModuleInit,
   Optional,
+  type Type,
 } from '@nestjs/common';
-import { MetadataScanner, ModuleRef, ModulesContainer, Reflector } from '@nestjs/core';
+import { type MetadataScanner, type ModuleRef, ModulesContainer, type Reflector } from '@nestjs/core';
 import * as common from 'oci-common';
-import { QueueClient, models, requests } from 'oci-queue';
+import { type models, QueueClient, type requests } from 'oci-queue';
 import { QUEUE_CONSUMER_EVENT_HANDLER, QUEUE_CONSUMER_METHOD, QUEUE_OPTIONS } from './queue.constants';
 import { MockQueueClient } from './queue.mock';
-import {
+import type {
   Message,
   OciQueueConsumerMapValues,
   OciQueueConsumerOptions,
@@ -32,14 +33,14 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
 
   private logger: LoggerService;
   private queueClients = new Map<string, QueueClient | MockQueueClient>();
-  private manualHandlerInstances: Set<any> = new Set();
+  private manualHandlerInstances: Set<unknown> = new Set();
   private handlerDiscoveryCache = new Map<
     string | symbol,
-    Array<{ meta: any; handler: (...args: any[]) => any; instance: any }>
+    Array<{ meta: unknown; handler: (...args: unknown[]) => unknown; instance: unknown }>
   >();
   private eventHandlersCache = new Map<
     QueueName,
-    Array<{ meta: QueueConsumerEventHandlerMeta; handler: (...args: any[]) => any; instance: any }>
+    Array<{ meta: QueueConsumerEventHandlerMeta; handler: (...args: unknown[]) => unknown; instance: unknown }>
   >();
   private readonly skippedTokens = new Set([
     'ModuleRef',
@@ -81,7 +82,7 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
 
       const authenticationDetailsProvider = new common.ConfigFileAuthenticationDetailsProvider(configFile, profileName);
 
-      const clientConfig: any = {
+      const clientConfig: { authenticationDetailsProvider: common.AuthenticationDetailsProvider } = {
         authenticationDetailsProvider,
       };
 
@@ -108,7 +109,7 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
   public async onModuleInit(): Promise<void> {
     this.logger = this.options.logger ?? new Logger('OciQueueService', { timestamp: false });
 
-    (global as any).__QUEUE_SERVICE_INSTANCE__ = this;
+    (global as { __QUEUE_SERVICE_INSTANCE__?: QueueService }).__QUEUE_SERVICE_INSTANCE__ = this;
 
     this.options.producers?.forEach((options) => {
       const { name, queueId, profile, region } = options;
@@ -219,7 +220,11 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
     consumer: OciQueueConsumerMapValues,
     handler: (message: OciQueueReceivedMessage | OciQueueReceivedMessage[]) => Promise<void>,
     isBatchHandler: boolean,
-    eventsMetadata: Array<{ meta: QueueConsumerEventHandlerMeta; handler: (...args: any[]) => any; instance: any }>,
+    eventsMetadata: Array<{
+      meta: QueueConsumerEventHandlerMeta;
+      handler: (...args: unknown[]) => unknown;
+      instance: unknown;
+    }>,
     options: OciQueueConsumerOptions,
   ) {
     let consecutiveErrors = 0;
@@ -271,7 +276,7 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
               }
             }
 
-            const deletePromises: Promise<any>[] = [];
+            const deletePromises: Promise<unknown>[] = [];
             for (let i = 0; i < messages.length; i++) {
               const msg = messages[i];
               if (msg.receipt) {
@@ -341,7 +346,7 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
         let delay = consumer.pollingInterval;
 
         if (consecutiveErrors > 0) {
-          delay = Math.min(baseBackoffDelay * Math.pow(2, Math.min(consecutiveErrors - 1, 5)), maxBackoffDelay);
+          delay = Math.min(baseBackoffDelay * 2 ** Math.min(consecutiveErrors - 1, 5), maxBackoffDelay);
         } else if (elapsed < consumer.pollingInterval) {
           delay = consumer.pollingInterval - elapsed;
         }
@@ -354,9 +359,13 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
   }
 
   private emitEvent(
-    eventsMetadata: Array<{ meta: QueueConsumerEventHandlerMeta; handler: (...args: any[]) => any; instance: any }>,
+    eventsMetadata: Array<{
+      meta: QueueConsumerEventHandlerMeta;
+      handler: (...args: unknown[]) => unknown;
+      instance: unknown;
+    }>,
     eventName: string,
-    error: any,
+    error: unknown,
     messages: OciQueueReceivedMessage[],
   ) {
     const eventMetadata = eventsMetadata.find(({ meta }) => meta.eventName === eventName);
@@ -374,7 +383,7 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
     }
   }
 
-  public registerHandlerInstances(instances: any[]): void {
+  public registerHandlerInstances(instances: unknown[]): void {
     for (const instance of instances) {
       if (instance && typeof instance === 'object') {
         this.manualHandlerInstances.add(instance);
@@ -385,14 +394,14 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
 
   private providerMethodsWithMetaAtKey<T>(
     metadataKey: symbol | string,
-  ): Array<{ meta: T; handler: (...args: any[]) => any; instance: any }> {
+  ): Array<{ meta: T; handler: (...args: unknown[]) => unknown; instance: unknown }> {
     const cacheKey = String(metadataKey);
     const cached = this.handlerDiscoveryCache.get(cacheKey);
     if (cached) {
-      return cached as Array<{ meta: T; handler: (...args: any[]) => any; instance: any }>;
+      return cached as Array<{ meta: T; handler: (...args: unknown[]) => unknown; instance: unknown }>;
     }
 
-    const results: Array<{ meta: T; handler: (...args: any[]) => any; instance: any }> = [];
+    const results: Array<{ meta: T; handler: (...args: unknown[]) => unknown; instance: unknown }> = [];
 
     for (const instance of this.manualHandlerInstances) {
       if (!instance || typeof instance !== 'object') {
@@ -422,9 +431,7 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
               instance,
             });
           }
-        } catch {
-          continue;
-        }
+        } catch {}
       }
     }
 
@@ -450,7 +457,7 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
       const commonHandlerNames = ['MessageHandler'];
       for (const handlerName of commonHandlerNames) {
         try {
-          const handlerInstance = this.moduleRef.get(handlerName as any, { strict: false });
+          const handlerInstance = this.moduleRef.get(handlerName as string, { strict: false });
           if (handlerInstance && typeof handlerInstance === 'object') {
             const prototype = Object.getPrototypeOf(handlerInstance);
             if (prototype) {
@@ -469,20 +476,16 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
                       instance: handlerInstance,
                     });
                   }
-                } catch {
-                  continue;
-                }
+                } catch {}
               }
             }
           }
-        } catch {
-          continue;
-        }
+        } catch {}
       }
     }
 
     if (containerToUse && typeof containerToUse.entries === 'function') {
-      const processedTokens = new Set<any>();
+      const processedTokens = new Set<string | symbol | Type<unknown>>();
 
       for (const [, module] of containerToUse.entries()) {
         const providers = module.providers;
@@ -509,14 +512,14 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
           }
           processedTokens.add(providerToken);
 
-          let instance: any;
+          let instance: unknown;
 
           try {
             if (this.moduleRef) {
               try {
-                instance = this.moduleRef.get(providerToken as any, { strict: false });
+                instance = this.moduleRef.get(providerToken as Type<unknown>, { strict: false });
                 if (!instance) {
-                  const providerInternal = provider as any;
+                  const providerInternal = provider as { metatype?: Type<unknown> };
                   if (providerInternal.metatype && typeof providerInternal.metatype === 'function') {
                     instance = this.moduleRef.get(providerInternal.metatype, { strict: false });
                   }
@@ -525,7 +528,7 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
                 if (provider.instance) {
                   instance = provider.instance;
                 } else {
-                  const providerInternal = provider as any;
+                  const providerInternal = provider as { instance?: unknown };
                   if (providerInternal.instance !== undefined && providerInternal.instance !== null) {
                     instance = providerInternal.instance;
                   }
@@ -535,7 +538,7 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
               if (provider.instance) {
                 instance = provider.instance;
               } else {
-                const providerInternal = provider as any;
+                const providerInternal = provider as { instance?: unknown };
                 if (providerInternal.instance !== undefined && providerInternal.instance !== null) {
                   instance = providerInternal.instance;
                 }
@@ -572,9 +575,7 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
                   instance,
                 });
               }
-            } catch {
-              continue;
-            }
+            } catch {}
           }
         }
       }
@@ -648,7 +649,7 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
     }
   }
 
-  public async send<T = any>(name: QueueName, payload: Message<T> | Message<T>[]): Promise<void> {
+  public async send<T = unknown>(name: QueueName, payload: Message<T> | Message<T>[]): Promise<void> {
     if (!this.producers.has(name)) {
       throw new Error(`Producer does not exist: ${name}`);
     }
