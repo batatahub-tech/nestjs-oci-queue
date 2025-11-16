@@ -1,0 +1,5 @@
+export const QUEUE_OPTIONS = Symbol.for('QUEUE_OPTIONS');
+export const QUEUE_SERVICE = Symbol.for('QUEUE_SERVICE');
+
+export const QUEUE_CONSUMER_METHOD = Symbol.for('QUEUE_CONSUMER_METHOD');
+export const QUEUE_CONSUMER_EVENT_HANDLER = Symbol.for('QUEUE_CONSUMER_EVENT_HANDLER');

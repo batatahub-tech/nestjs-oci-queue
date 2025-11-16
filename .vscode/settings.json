@@ -1,0 +1,11 @@
+{
+  "biome.enabled": true,
+  "[json]": {
+    "editor.defaultFormatter": "biomejs.biome"
+  },
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "never",
+    "quickfix.biome": "always",
+    "source.organizeImports.biome": "always"
+  }
+}
