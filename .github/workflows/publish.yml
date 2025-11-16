@@ -60,6 +60,8 @@ jobs:
           node-version: 20.x
           cache: 'pnpm'
           registry-url: 'https://registry.npmjs.org'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Install Dependencies
         run: pnpm install --frozen-lockfile --strict-peer-dependencies
@@ -75,4 +77,4 @@ jobs:
       - name: 🐙 Publish
         run: pnpm publish --no-git-checks --access=public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
