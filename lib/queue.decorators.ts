@@ -12,7 +12,7 @@ export const QueueConsumerEventHandler = (name: string, eventName: string) =>
 
 export function QueueHandler() {
   // biome-ignore lint/suspicious/noExplicitAny: Mixin pattern requires any[] for constructor args
-  return <T extends { new (...args: any[]): Record<string, unknown> }>(ctor: T) => {
+  return function <T extends new (...args: any[]) => object>(ctor: T) {
     Injectable()(ctor);
 
     return class extends ctor implements OnModuleInit {
@@ -49,6 +49,6 @@ export function QueueHandler() {
           await originalOnModuleInit.call(this);
         }
       }
-    } as T;
+    } as unknown as T;
   };
 }

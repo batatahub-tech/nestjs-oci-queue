@@ -1,6 +1,7 @@
 import {
   Inject,
   Injectable,
+  type InjectionToken,
   Logger,
   type LoggerService,
   type OnApplicationBootstrap,
@@ -9,7 +10,7 @@ import {
   Optional,
   type Type,
 } from '@nestjs/common';
-import { type MetadataScanner, type ModuleRef, ModulesContainer, type Reflector } from '@nestjs/core';
+import { MetadataScanner, ModuleRef, ModulesContainer, Reflector } from '@nestjs/core';
 import * as common from 'oci-common';
 import { type models, QueueClient, type requests } from 'oci-queue';
 import { QUEUE_CONSUMER_EVENT_HANDLER, QUEUE_CONSUMER_METHOD, QUEUE_OPTIONS } from './queue.constants';
@@ -53,10 +54,10 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
 
   public constructor(
     @Inject(QUEUE_OPTIONS) public readonly options: QueueOptions,
-    private readonly reflector: Reflector,
-    private readonly modulesContainer: ModulesContainer,
-    private readonly metadataScanner: MetadataScanner,
-    @Optional() private readonly moduleRef?: ModuleRef,
+    @Inject(Reflector) private readonly reflector: Reflector,
+    @Inject(ModulesContainer) private readonly modulesContainer: ModulesContainer,
+    @Inject(MetadataScanner) private readonly metadataScanner: MetadataScanner,
+    @Optional() @Inject(ModuleRef) private readonly moduleRef?: ModuleRef,
   ) {}
 
   private createQueueClient(profile?: string, region?: string, endpoint?: string): QueueClient {
@@ -485,7 +486,7 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
     }
 
     if (containerToUse && typeof containerToUse.entries === 'function') {
-      const processedTokens = new Set<string | symbol | Type<unknown>>();
+      const processedTokens = new Set<InjectionToken>();
 
       for (const [, module] of containerToUse.entries()) {
         const providers = module.providers;

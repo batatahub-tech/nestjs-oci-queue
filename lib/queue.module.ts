@@ -20,7 +20,22 @@ export class QueueModule {
     return {
       module: QueueModule,
       imports: [],
-      providers: [queueOptions, queueProvider, Reflector, ModulesContainer, MetadataScanner],
+      providers: [
+        {
+          provide: Reflector,
+          useFactory: () => new Reflector(),
+        },
+        {
+          provide: ModulesContainer,
+          useFactory: () => new ModulesContainer(),
+        },
+        {
+          provide: MetadataScanner,
+          useFactory: () => new MetadataScanner(),
+        },
+        queueOptions,
+        queueProvider,
+      ],
       exports: [queueProvider],
       global: true,
     };
@@ -36,7 +51,22 @@ export class QueueModule {
     return {
       module: QueueModule,
       imports: [...(options.imports ?? [])],
-      providers: [...asyncProviders, queueProvider, Reflector, ModulesContainer, MetadataScanner],
+      providers: [
+        ...asyncProviders,
+        {
+          provide: Reflector,
+          useFactory: () => new Reflector(),
+        },
+        {
+          provide: ModulesContainer,
+          useFactory: () => new ModulesContainer(),
+        },
+        {
+          provide: MetadataScanner,
+          useFactory: () => new MetadataScanner(),
+        },
+        queueProvider,
+      ],
       exports: [queueProvider],
       global: true,
     };
