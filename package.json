@@ -1,5 +1,5 @@
 {
-  "name": "@batatahub/nestjs-oci-queue",
+  "name": "@batatahub.com/nestjs-oci-queue",
   "version": "1.0.0",
   "description": "NestJS module for Oracle Cloud Infrastructure (OCI) Queue",
   "main": "dist/index.js",
