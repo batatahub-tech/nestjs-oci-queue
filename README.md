@@ -1,6 +1,6 @@
-# @batatahub/nestjs-oci-queue
+# @batatahub.com/nestjs-oci-queue
 
-[![Test](https://github.com/batatahub/nestjs-oci-queue/workflows/Test/badge.svg)](https://github.com/batatahub/nestjs-oci-queue/actions?query=workflow%3ATest)
+[![Test](https://github.com/batatahub-tech/nestjs-oci-queue/workflows/Test/badge.svg)](https://github.com/batatahub-tech/nestjs-oci-queue/actions?query=workflow%3ATest)
 [![npm version](https://badge.fury.io/js/%40batatahub%2Fnestjs-oci-queue.svg)](https://badge.fury.io/js/%40batatahub%2Fnestjs-oci-queue)
 
 A powerful NestJS module for seamless integration with **Oracle Cloud Infrastructure (OCI) Queue**. Built with TypeScript and designed for modern NestJS applications, this module provides a decorator-based approach to handle queue messages with minimal configuration.
@@ -18,13 +18,13 @@ A powerful NestJS module for seamless integration with **Oracle Cloud Infrastruc
 ## Installation
 
 ```bash
-npm install @batatahub/nestjs-oci-queue oci-queue oci-common
+npm install @batatahub.com/nestjs-oci-queue oci-queue oci-common
 ```
 
 Or with pnpm:
 
 ```bash
-pnpm add @batatahub/nestjs-oci-queue oci-queue oci-common
+pnpm add @batatahub.com/nestjs-oci-queue oci-queue oci-common
 ```
 
 ## Prerequisites
@@ -49,7 +49,7 @@ For production, ensure your OCI credentials are configured:
 
 ```typescript
 import { Module } from '@nestjs/common';
-import { QueueModule } from '@batatahub/nestjs-oci-queue';
+import { QueueModule } from '@batatahub.com/nestjs-oci-queue';
 
 @Module({
   imports: [
@@ -84,7 +84,7 @@ import {
   QueueMessageHandler,
   QueueConsumerEventHandler,
   OciQueueReceivedMessage,
-} from '@batatahub/nestjs-oci-queue';
+} from '@batatahub.com/nestjs-oci-queue';
 
 @Injectable()
 export class OrderHandler {
@@ -107,7 +107,7 @@ export class OrderHandler {
 
 ```typescript
 import { Injectable } from '@nestjs/common';
-import { QueueService, Message } from '@batatahub/nestjs-oci-queue';
+import { QueueService, Message } from '@batatahub.com/nestjs-oci-queue';
 
 @Injectable()
 export class OrderService {

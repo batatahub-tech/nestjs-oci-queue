@@ -18,11 +18,11 @@
     "check:fix": "biome check --write ."
   },
   "bugs": {
-    "url": "https://github.com/batatahub/nestjs-oci-queue/issues"
+    "url": "https://github.com/batatahub-tech/nestjs-oci-queue/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/batatahub/nestjs-oci-queue.git"
+    "url": "git+https://github.com/batatahub-tech/nestjs-oci-queue.git"
   },
   "keywords": [
     "nestjs",
