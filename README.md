@@ -1,59 +1,64 @@
-# nestjs-oci-queue
+# @batatahub/nestjs-oci-queue
 
-Tested with: [Oracle Cloud](https://www.oracle.com/br/cloud).
+[![Test](https://github.com/batatahub/nestjs-oci-queue/workflows/Test/badge.svg)](https://github.com/batatahub/nestjs-oci-queue/actions?query=workflow%3ATest)
+[![npm version](https://badge.fury.io/js/%40batatahub%2Fnestjs-oci-queue.svg)](https://badge.fury.io/js/%40batatahub%2Fnestjs-oci-queue)
 
-Nestjs-oci-queue is a project to make OCI Queue easier to use and control some required flows with NestJS.
-This module provides decorator-based message handling suited for simple use.
+A powerful NestJS module for seamless integration with **Oracle Cloud Infrastructure (OCI) Queue**. Built with TypeScript and designed for modern NestJS applications, this module provides a decorator-based approach to handle queue messages with minimal configuration.
+
+## Features
+
+- 🎯 **Decorator-based message handling** - Simple and intuitive API
+- 🔄 **Automatic message polling** - Background consumers with configurable intervals
+- 📦 **Batch processing support** - Handle multiple messages efficiently
+- 🧪 **Built-in mock mode** - Test locally without OCI credentials
+- ⚡ **Type-safe** - Full TypeScript support with proper types
+- 🛡️ **Error handling** - Built-in error events and retry mechanisms
+- 🔌 **NestJS native** - Seamless integration with NestJS dependency injection
 
 ## Installation
 
-```shell script
-npm i --save @batatahub/nestjs-oci-queue oci-queue oci-common
+```bash
+npm install @batatahub/nestjs-oci-queue oci-queue oci-common
 ```
+
+Or with pnpm:
+
+```bash
+pnpm add @batatahub/nestjs-oci-queue oci-queue oci-common
+```
+
+## Prerequisites
+
+- Node.js >= 18.0.0
+- NestJS >= 6.10.11
+- OCI Queue OCID (not URL) - format: `ocid1.queue.oc1.region.unique_id`
+- OCI credentials configured (or use local mode for development)
 
 ## Quick Start
 
-### Local Development Mode
+### 1. Configure OCI Credentials
+
+For production, ensure your OCI credentials are configured:
 
 ```bash
-OCI_QUEUE_LOCAL_MODE=true
+# Default location: ~/.oci/config
+# Or set OCI_CONFIG_FILE environment variable
 ```
 
-For local development and testing, you can use the built-in mock mode that simulates OCI Queue locally.
+### 2. Register the Module
 
-**Option 1: Via Environment Variable (Recommended)**
-```bash
-npm run start:dev
-```
+```typescript
+import { Module } from '@nestjs/common';
+import { QueueModule } from '@batatahub/nestjs-oci-queue';
 
-**Option 2: Via Module Configuration**
-```ts
-QueueModule.register({
-  localMode: true, // Enable local mock mode
-  consumers: [...],
-  producers: [...],
-})
-```
-
-When `localMode` is enabled, the library uses `MockQueueClient` instead of the real OCI QueueClient. This allows you to:
-- Develop and test locally without OCI credentials
-- Work offline
-- Have full control over queue behavior
-- Test without costs
-
-The mock mode is transparent - your code works exactly the same way as in production!
-
-### Register module
-
-```ts
 @Module({
   imports: [
     QueueModule.register({
       consumers: [
         {
-          name: "myConsumer1",
-          queueId: "ocid1.queue.oc1.region.unique_id",
-          pollingInterval: 1000,
+          name: 'orderProcessor',
+          queueId: 'ocid1.queue.oc1.sa-saopaulo-1.amaaaaaa...',
+          pollingInterval: 1000, // milliseconds
           visibilityTimeoutInSeconds: 30,
           timeoutInSeconds: 30,
           maxMessages: 10,
@@ -61,99 +66,231 @@ The mock mode is transparent - your code works exactly the same way as in produc
       ],
       producers: [
         {
-          name: "myProducer1",
-          queueId: "ocid1.queue.oc1.region.unique_id",
+          name: 'orderProducer',
+          queueId: 'ocid1.queue.oc1.sa-saopaulo-1.amaaaaaa...',
         },
       ],
-      localMode: process.env.OCI_QUEUE_LOCAL_MODE === 'true',
     }),
   ],
 })
-class AppModule {}
+export class AppModule {}
 ```
 
-Quite often you might want to asynchronously pass module options instead of passing them beforehand.
-In such case, use `registerAsync()` method like many other Nest.js libraries.
+### 3. Create Message Handlers
 
-- Use factory
-
-```ts
-QueueModule.registerAsync({
-  useFactory: () => {
-    return {
-      consumers: [...],
-      producers: [...],
-    };
-  },
-});
-```
-
-- Use class
-
-```ts
-QueueModule.registerAsync({
-  useClass: QueueConfigService,
-});
-```
-
-- Use existing
-
-```ts
-QueueModule.registerAsync({
-  imports: [ConfigModule],
-  useExisting: ConfigService,
-});
-```
-
-### Decorate methods
-
-You need to decorate methods in your NestJS providers in order to have them be automatically attached as event handlers for incoming OCI Queue messages:
-
-```ts
-import { OciQueueReceivedMessage } from "@batatahub/nestjs-oci-queue";
+```typescript
+import { Injectable } from '@nestjs/common';
+import {
+  QueueMessageHandler,
+  QueueConsumerEventHandler,
+  OciQueueReceivedMessage,
+} from '@batatahub/nestjs-oci-queue';
 
 @Injectable()
-export class AppMessageHandler {
-  @QueueMessageHandler(/** name: */ "myConsumer1", /** batch: */ false)
-  public async handleMessage(message: OciQueueReceivedMessage) {}
+export class OrderHandler {
+  @QueueMessageHandler('orderProcessor', false)
+  async processOrder(message: OciQueueReceivedMessage) {
+    const orderData = JSON.parse(message.content);
+    console.log('Processing order:', orderData);
+    // Your business logic here
+  }
 
-  @QueueConsumerEventHandler(
-    /** name: */ "myConsumer1",
-    /** eventName: */ "processing_error",
-  )
-  public onProcessingError(error: Error, message: OciQueueReceivedMessage) {
-    // report errors here
+  @QueueConsumerEventHandler('orderProcessor', 'processing_error')
+  onProcessingError(error: Error, message: OciQueueReceivedMessage) {
+    console.error('Failed to process order:', error);
+    // Error reporting logic
   }
 }
 ```
 
-### Produce messages
+### 4. Send Messages
 
-```ts
-import { QueueService, Message } from "@batatahub/nestjs-oci-queue";
+```typescript
+import { Injectable } from '@nestjs/common';
+import { QueueService, Message } from '@batatahub/nestjs-oci-queue';
 
-export class AppService {
-  public constructor(
-    private readonly queueService: QueueService,
-  ) { }
+@Injectable()
+export class OrderService {
+  constructor(private readonly queueService: QueueService) {}
 
-  public async dispatchSomething() {
-    await this.queueService.send(/** name: */ 'myProducer1', {
-      body: { ... },
+  async createOrder(orderData: any) {
+    await this.queueService.send('orderProducer', {
+      body: orderData,
       metadata: {
-        channelId: 'default',
-        customProperties: { ... },
+        channelId: 'orders',
+        customProperties: {
+          source: 'api',
+          version: '1.0',
+        },
       },
     });
   }
 }
 ```
 
-### Configuration
+## Local Development Mode
 
-See [here](https://github.com/batatahub/nestjs-oci-queue/blob/master/lib/queue.types.ts) for available configuration options.
-In most cases you just need to specify both `name` and `queueId` (OCID) at the minimum requirements.
+Develop and test without OCI credentials using the built-in mock mode:
+
+### Option 1: Environment Variable (Recommended)
+
+```bash
+export OCI_QUEUE_LOCAL_MODE=true
+npm run start:dev
+```
+
+### Option 2: Module Configuration
+
+```typescript
+QueueModule.register({
+  localMode: true,
+  consumers: [...],
+  producers: [...],
+})
+```
+
+**Benefits of local mode:**
+- ✅ No OCI credentials required
+- ✅ Works offline
+- ✅ No costs
+- ✅ Full control over queue behavior
+- ✅ Same API as production
+
+## Advanced Configuration
+
+### Async Module Registration
+
+Use `registerAsync()` for dynamic configuration:
+
+```typescript
+import { ConfigModule, ConfigService } from '@nestjs/config';
+
+QueueModule.registerAsync({
+  imports: [ConfigModule],
+  useFactory: (configService: ConfigService) => ({
+    consumers: [
+      {
+        name: 'orderProcessor',
+        queueId: configService.get('OCI_QUEUE_ID'),
+        pollingInterval: configService.get('POLLING_INTERVAL', 1000),
+      },
+    ],
+    producers: [
+      {
+        name: 'orderProducer',
+        queueId: configService.get('OCI_QUEUE_ID'),
+      },
+    ],
+  }),
+  inject: [ConfigService],
+})
+```
+
+### Batch Processing
+
+Handle multiple messages at once:
+
+```typescript
+@Injectable()
+export class BatchOrderHandler {
+  @QueueMessageHandler('orderProcessor', true) // batch: true
+  async processBatch(messages: OciQueueReceivedMessage[]) {
+    for (const message of messages) {
+      const orderData = JSON.parse(message.content);
+      await this.processOrder(orderData);
+    }
+  }
+}
+```
+
+### Custom Profiles and Regions
+
+```typescript
+QueueModule.register({
+  profile: 'PRODUCTION',
+  region: 'us-ashburn-1',
+  consumers: [
+    {
+      name: 'orderProcessor',
+      queueId: 'ocid1.queue...',
+      profile: 'PRODUCTION', // Override global profile
+      region: 'us-ashburn-1', // Override global region
+    },
+  ],
+})
+```
+
+### Error Handling Events
+
+Subscribe to different consumer events:
+
+```typescript
+@Injectable()
+export class OrderHandler {
+  @QueueConsumerEventHandler('orderProcessor', 'error')
+  onError(error: Error) {
+    // Handle polling errors
+  }
+
+  @QueueConsumerEventHandler('orderProcessor', 'processing_error')
+  onProcessingError(error: Error, message: OciQueueReceivedMessage) {
+    // Handle message processing errors
+  }
+}
+```
+
+## Configuration Options
+
+### QueueOptions
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `consumers` | `OciQueueConsumerOptions[]` | No | Array of consumer configurations |
+| `producers` | `OciQueueProducerOptions[]` | No | Array of producer configurations |
+| `localMode` | `boolean` | No | Enable mock mode for local development |
+| `profile` | `string` | No | OCI profile name (default: 'DEFAULT') |
+| `region` | `string` | No | OCI region |
+| `endpoint` | `string` | No | Custom OCI endpoint |
+| `logger` | `LoggerService` | No | Custom logger instance |
+
+### OciQueueConsumerOptions
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `name` | `string` | Yes | Unique consumer identifier |
+| `queueId` | `string` | Yes | OCI Queue OCID |
+| `pollingInterval` | `number` | No | Polling interval in ms (default: 1000) |
+| `visibilityTimeoutInSeconds` | `number` | No | Message visibility timeout (default: 30) |
+| `timeoutInSeconds` | `number` | No | Request timeout (default: 30) |
+| `maxMessages` | `number` | No | Max messages per poll (default: 10) |
+| `stopOnError` | `boolean` | No | Stop consumer on error (default: false) |
+| `profile` | `string` | No | Override global profile |
+| `region` | `string` | No | Override global region |
+| `endpoint` | `string` | No | Override global endpoint |
+
+### OciQueueProducerOptions
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `name` | `string` | Yes | Unique producer identifier |
+| `queueId` | `string` | Yes | OCI Queue OCID |
+| `profile` | `string` | No | Override global profile |
+| `region` | `string` | No | Override global region |
+| `endpoint` | `string` | No | Override global endpoint |
+
+## Type Definitions
+
+For complete type definitions, see [queue.types.ts](./lib/queue.types.ts).
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the terms of the MIT license.
+This project is licensed under the [MIT License](./LICENSE).
+
+## Related Projects
+
+- [OCI Queue Documentation](https://docs.oracle.com/en-us/iaas/Content/queue/overview.htm)
+- [NestJS Documentation](https://docs.nestjs.com/)
