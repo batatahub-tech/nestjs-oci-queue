@@ -1,3 +1,4 @@
+/** biome-ignore-all lint/complexity/noStaticOnlyClass: We need to use static methods to register the module */
 import { type DynamicModule, Module, type Provider, type Type } from '@nestjs/common';
 import { MetadataScanner, ModulesContainer, Reflector } from '@nestjs/core';
 import { QUEUE_OPTIONS } from './queue.constants';

@@ -131,9 +131,11 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
   public async onApplicationBootstrap(): Promise<void> {
     if (Array.from(this.modulesContainer.entries()).length === 0) {
       try {
-        const globalApp = (global as {
-          __NEST_APP__?: { container?: { modules?: ModulesContainer } };
-        }).__NEST_APP__;
+        const globalApp = (
+          global as {
+            __NEST_APP__?: { container?: { modules?: ModulesContainer } };
+          }
+        ).__NEST_APP__;
         if (globalApp?.container?.modules) {
           Object.setPrototypeOf(this.modulesContainer, globalApp.container.modules);
           const globalModules = Array.from(globalApp.container.modules.entries());
@@ -141,9 +143,7 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
             (this.modulesContainer as Map<unknown, unknown>).set(key, value);
           }
         }
-      } catch {
-        // Ignorar erros
-      }
+      } catch {}
     }
 
     let messageHandlers: HandlerMetadata[] = [];
@@ -276,9 +276,7 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
                   if (module.instance) {
                     instance = module.instance;
                   }
-                } catch {
-                  // Ignorar
-                }
+                } catch {}
               }
             }
           } else if (module.instance) {
@@ -319,9 +317,7 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
         if (instance && typeof instance === 'object') {
           this.scanInstanceForHandlers(instance, handlers);
         }
-      } catch {
-        // Ignorar
-      }
+      } catch {}
     }
 
     return handlers;
@@ -355,9 +351,7 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
             instance,
           });
         }
-      } catch {
-        // Ignorar
-      }
+      } catch {}
     }
   }
 
@@ -452,9 +446,7 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
                 instance,
               });
             }
-          } catch {
-            // Ignorar
-          }
+          } catch {}
         }
       }
     }
