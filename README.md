@@ -7,13 +7,14 @@ A powerful NestJS module for seamless integration with **Oracle Cloud Infrastruc
 
 ## Features
 
-- 🎯 **Decorator-based message handling** - Simple and intuitive API
+- 🎯 **Simple decorator-based API** - Use `@QueueConsumer()` decorator for elegant message handling
 - 🔄 **Automatic message polling** - Background consumers with configurable intervals
-- 📦 **Batch processing support** - Handle multiple messages efficiently
+- 📦 **Batch processing support** - Handle multiple messages efficiently with `{ batch: true }`
 - 🧪 **Built-in mock mode** - Test locally without OCI credentials
 - ⚡ **Type-safe** - Full TypeScript support with proper types
 - 🛡️ **Error handling** - Built-in error events and retry mechanisms
-- 🔌 **NestJS native** - Seamless integration with NestJS dependency injection
+- 🔌 **NestJS 11 native** - Optimized for NestJS 11 with automatic handler discovery
+- 🚀 **Zero configuration** - Handlers are discovered automatically, no manual registration needed
 
 ## Installation
 
@@ -30,7 +31,7 @@ pnpm add @batatahub.com/nestjs-oci-queue oci-queue oci-common
 ## Prerequisites
 
 - Node.js >= 18.0.0
-- NestJS >= 6.10.11
+- NestJS >= 11.0.0
 - OCI Queue OCID (not URL) - format: `ocid1.queue.oc1.region.unique_id`
 - OCI credentials configured (or use local mode for development)
 
@@ -81,16 +82,18 @@ export class AppModule {}
 ```typescript
 import { Injectable } from '@nestjs/common';
 import {
-  QueueMessageHandler,
+  QueueConsumer,
   QueueConsumerEventHandler,
   OciQueueReceivedMessage,
 } from '@batatahub.com/nestjs-oci-queue';
 
 @Injectable()
 export class OrderHandler {
-  @QueueMessageHandler('orderProcessor', false)
+  @QueueConsumer('orderProcessor')
   async processOrder(message: OciQueueReceivedMessage) {
-    const orderData = JSON.parse(message.content);
+    // O conteúdo já vem decodificado em message.Body (compatibilidade)
+    // ou use message.content (base64) e decodifique manualmente
+    const orderData = JSON.parse(message.Body || Buffer.from(message.content, 'base64').toString('utf-8'));
     console.log('Processing order:', orderData);
     // Your business logic here
   }
@@ -193,10 +196,10 @@ Handle multiple messages at once:
 ```typescript
 @Injectable()
 export class BatchOrderHandler {
-  @QueueMessageHandler('orderProcessor', true) // batch: true
+  @QueueConsumer('orderProcessor', { batch: true })
   async processBatch(messages: OciQueueReceivedMessage[]) {
     for (const message of messages) {
-      const orderData = JSON.parse(message.content);
+      const orderData = JSON.parse(message.Body || Buffer.from(message.content, 'base64').toString('utf-8'));
       await this.processOrder(orderData);
     }
   }

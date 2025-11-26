@@ -1,16 +1,14 @@
 import {
   Inject,
   Injectable,
-  type InjectionToken,
   Logger,
   type LoggerService,
   type OnApplicationBootstrap,
   type OnModuleDestroy,
   type OnModuleInit,
   Optional,
-  type Type,
 } from '@nestjs/common';
-import { MetadataScanner, ModuleRef, ModulesContainer, Reflector } from '@nestjs/core';
+import { MetadataScanner, type ModuleRef, ModulesContainer, Reflector } from '@nestjs/core';
 import * as common from 'oci-common';
 import { type models, QueueClient, type requests } from 'oci-queue';
 import { QUEUE_CONSUMER_EVENT_HANDLER, QUEUE_CONSUMER_METHOD, QUEUE_OPTIONS } from './queue.constants';
@@ -27,6 +25,18 @@ import type {
   QueueOptions,
 } from './queue.types';
 
+interface HandlerMetadata {
+  meta: QueueMessageHandlerMeta;
+  handler: (message: OciQueueReceivedMessage | OciQueueReceivedMessage[]) => Promise<void>;
+  instance: unknown;
+}
+
+interface EventHandlerMetadata {
+  meta: QueueConsumerEventHandlerMeta;
+  handler: (...args: unknown[]) => unknown;
+  instance: unknown;
+}
+
 @Injectable()
 export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnModuleDestroy {
   public readonly consumers = new Map<QueueName, OciQueueConsumerMapValues>();
@@ -34,30 +44,13 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
 
   private logger: LoggerService;
   private queueClients = new Map<string, QueueClient | MockQueueClient>();
-  private manualHandlerInstances: Set<unknown> = new Set();
-  private handlerDiscoveryCache = new Map<
-    string | symbol,
-    Array<{ meta: unknown; handler: (...args: unknown[]) => unknown; instance: unknown }>
-  >();
-  private eventHandlersCache = new Map<
-    QueueName,
-    Array<{ meta: QueueConsumerEventHandlerMeta; handler: (...args: unknown[]) => unknown; instance: unknown }>
-  >();
-  private readonly skippedTokens = new Set([
-    'ModuleRef',
-    'Reflector',
-    'ModulesContainer',
-    'MetadataScanner',
-    'QueueService',
-    'QUEUE_OPTIONS',
-  ]);
 
   public constructor(
     @Inject(QUEUE_OPTIONS) public readonly options: QueueOptions,
     @Inject(Reflector) private readonly reflector: Reflector,
     @Inject(ModulesContainer) private readonly modulesContainer: ModulesContainer,
     @Inject(MetadataScanner) private readonly metadataScanner: MetadataScanner,
-    @Optional() @Inject(ModuleRef) private readonly moduleRef?: ModuleRef,
+    @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
 
   private createQueueClient(profile?: string, region?: string, endpoint?: string): QueueClient {
@@ -73,7 +66,6 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
     if (localMode) {
       const client = new MockQueueClient();
       this.queueClients.set(key, client);
-
       return client as unknown as QueueClient;
     }
 
@@ -110,8 +102,6 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
   public async onModuleInit(): Promise<void> {
     this.logger = this.options.logger ?? new Logger('OciQueueService', { timestamp: false });
 
-    (global as { __QUEUE_SERVICE_INSTANCE__?: QueueService }).__QUEUE_SERVICE_INSTANCE__ = this;
-
     this.options.producers?.forEach((options) => {
       const { name, queueId, profile, region } = options;
       if (this.producers.has(name)) {
@@ -139,25 +129,50 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
   }
 
   public async onApplicationBootstrap(): Promise<void> {
-    let messageHandlers = this.providerMethodsWithMetaAtKey<QueueMessageHandlerMeta>(QUEUE_CONSUMER_METHOD);
-    let eventHandlers = this.providerMethodsWithMetaAtKey<QueueConsumerEventHandlerMeta>(QUEUE_CONSUMER_EVENT_HANDLER);
-
-    if (messageHandlers.length === 0 && this.options.consumers && this.options.consumers.length > 0) {
-      const delays = [50, 100, 200, 500, 1000];
-      for (const delay of delays) {
-        await new Promise((resolve) => setTimeout(resolve, delay));
-        messageHandlers = this.providerMethodsWithMetaAtKey<QueueMessageHandlerMeta>(QUEUE_CONSUMER_METHOD);
-        eventHandlers = this.providerMethodsWithMetaAtKey<QueueConsumerEventHandlerMeta>(QUEUE_CONSUMER_EVENT_HANDLER);
-        if (messageHandlers.length > 0) {
-          break;
+    if (Array.from(this.modulesContainer.entries()).length === 0) {
+      try {
+        const globalApp = (global as {
+          __NEST_APP__?: { container?: { modules?: ModulesContainer } };
+        }).__NEST_APP__;
+        if (globalApp?.container?.modules) {
+          Object.setPrototypeOf(this.modulesContainer, globalApp.container.modules);
+          const globalModules = Array.from(globalApp.container.modules.entries());
+          for (const [key, value] of globalModules) {
+            (this.modulesContainer as Map<unknown, unknown>).set(key, value);
+          }
         }
+      } catch {
+        // Ignorar erros
       }
+    }
 
-      if (messageHandlers.length === 0 && !this.moduleRef) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        messageHandlers = this.providerMethodsWithMetaAtKey<QueueMessageHandlerMeta>(QUEUE_CONSUMER_METHOD);
-        eventHandlers = this.providerMethodsWithMetaAtKey<QueueConsumerEventHandlerMeta>(QUEUE_CONSUMER_EVENT_HANDLER);
+    let messageHandlers: HandlerMetadata[] = [];
+    let eventHandlers: EventHandlerMetadata[] = [];
+    const maxRetries = 5;
+    const delays = [100, 200, 500, 1000, 2000];
+
+    for (let i = 0; i < maxRetries; i++) {
+      await new Promise((resolve) => setTimeout(resolve, delays[i]));
+      messageHandlers = this.discoverMessageHandlers();
+      eventHandlers = this.discoverEventHandlers();
+
+      if (messageHandlers.length > 0) {
+        break;
       }
+    }
+
+    if (messageHandlers.length === 0) {
+      const moduleCount = Array.from(this.modulesContainer.entries()).length;
+      this.logger.warn(
+        `No message handlers found after ${maxRetries} attempts. ` +
+          `Modules scanned: ${moduleCount}. ` +
+          `ModuleRef available: ${this.moduleRef ? 'yes' : 'no'}. ` +
+          `Make sure your @Injectable() classes with @QueueConsumer() decorators are registered in a module.`,
+      );
+    } else {
+      this.logger.log(
+        `Found ${messageHandlers.length} message handler(s): ${messageHandlers.map((h) => h.meta.name).join(', ')}`,
+      );
     }
 
     this.options.consumers?.forEach((options) => {
@@ -175,25 +190,21 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
         );
       }
 
-      const metadata = messageHandlers.find(({ meta }) => meta.name === name);
-      if (!metadata) {
+      const handlerMetadata = messageHandlers.find((h) => h.meta.name === name);
+      if (!handlerMetadata) {
         const availableHandlers = messageHandlers.map((h) => h.meta.name);
-        const moduleCount = this.modulesContainer
-          ? this.modulesContainer.size || Array.from(this.modulesContainer.entries()).length
-          : 0;
         this.logger.warn(
-          `No metadata found for: ${name}. ` +
+          `No handler found for queue '${name}'. ` +
             `Available handlers: [${availableHandlers.join(', ') || 'none'}]. ` +
-            `ModuleRef available: ${this.moduleRef ? 'yes' : 'no'}. ` +
-            `ModulesContainer entries: ${moduleCount}`,
+            `Make sure you have a method decorated with @QueueConsumer('${name}') in an @Injectable() class.`,
         );
         return;
       }
 
-      const isBatchHandler = metadata.meta.batch === true;
-      const handler = metadata.handler.bind(metadata.instance);
+      const isBatchHandler = handlerMetadata.meta.batch === true;
+      const handler = handlerMetadata.handler.bind(handlerMetadata.instance);
 
-      const eventsMetadata = eventHandlers.filter(({ meta }) => meta.name === name);
+      const queueEventHandlers = eventHandlers.filter((h) => h.meta.name === name);
 
       const endpoint = options.endpoint || this.options.endpoint;
       const queueClient = this.createQueueClient(
@@ -210,10 +221,245 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
         stopOnError,
       };
 
-      this.startPolling(name, consumer, handler, isBatchHandler, eventsMetadata, options);
+      this.startPolling(name, consumer, handler, isBatchHandler, queueEventHandlers, options);
 
       this.consumers.set(name, consumer);
     });
+  }
+
+  private discoverMessageHandlers(): HandlerMetadata[] {
+    const handlers: HandlerMetadata[] = [];
+    const processedInstances = new WeakSet<object>();
+
+    const moduleEntries = Array.from(this.modulesContainer.entries());
+    if (moduleEntries.length === 0) {
+      this.logger.debug('ModulesContainer is empty, trying alternative discovery method');
+      return this.discoverHandlersViaModuleRef();
+    }
+
+    for (const [, module] of moduleEntries) {
+      const providers = module.providers;
+
+      if (!providers) {
+        continue;
+      }
+
+      for (const [providerToken, providerDefinition] of providers.entries()) {
+        if (
+          typeof providerToken === 'string' &&
+          (providerToken.includes('ModuleRef') ||
+            providerToken.includes('Reflector') ||
+            providerToken.includes('ModulesContainer') ||
+            providerToken.includes('MetadataScanner') ||
+            providerToken.includes('QueueService') ||
+            providerToken.includes('QUEUE_OPTIONS'))
+        ) {
+          continue;
+        }
+
+        let instance: unknown;
+
+        try {
+          if (providerDefinition.instance) {
+            instance = providerDefinition.instance;
+          } else if (this.moduleRef && typeof providerToken === 'function') {
+            try {
+              instance = this.moduleRef.get(providerToken, { strict: false });
+            } catch {
+              try {
+                const className = providerToken.name;
+                if (className && className !== 'Function' && className !== 'Object') {
+                  instance = this.moduleRef.get(className, { strict: false });
+                }
+              } catch {
+                try {
+                  if (module.instance) {
+                    instance = module.instance;
+                  }
+                } catch {
+                  // Ignorar
+                }
+              }
+            }
+          } else if (module.instance) {
+            instance = module.instance;
+          }
+        } catch {
+          continue;
+        }
+
+        if (!instance || typeof instance !== 'object') {
+          continue;
+        }
+
+        if (processedInstances.has(instance)) {
+          continue;
+        }
+        processedInstances.add(instance);
+
+        this.scanInstanceForHandlers(instance, handlers);
+      }
+    }
+
+    return handlers;
+  }
+
+  private discoverHandlersViaModuleRef(): HandlerMetadata[] {
+    const handlers: HandlerMetadata[] = [];
+
+    if (!this.moduleRef) {
+      return handlers;
+    }
+
+    const knownConsumerClasses = ['SendMessageConsumer', 'WebhookConsumer', 'DeadLetterQueueConsumer'];
+
+    for (const className of knownConsumerClasses) {
+      try {
+        const instance = this.moduleRef.get(className, { strict: false });
+        if (instance && typeof instance === 'object') {
+          this.scanInstanceForHandlers(instance, handlers);
+        }
+      } catch {
+        // Ignorar
+      }
+    }
+
+    return handlers;
+  }
+
+  private scanInstanceForHandlers(instance: unknown, handlers: HandlerMetadata[]): void {
+    if (!instance || typeof instance !== 'object') {
+      return;
+    }
+
+    const prototype = Object.getPrototypeOf(instance);
+    if (!prototype) {
+      return;
+    }
+
+    const methodNames = this.metadataScanner.getAllMethodNames(prototype);
+
+    for (const methodName of methodNames) {
+      try {
+        const method = prototype[methodName];
+        if (typeof method !== 'function') {
+          continue;
+        }
+
+        const metadata = this.reflector.get<QueueMessageHandlerMeta>(QUEUE_CONSUMER_METHOD, method);
+
+        if (metadata) {
+          handlers.push({
+            meta: metadata,
+            handler: method as (message: OciQueueReceivedMessage | OciQueueReceivedMessage[]) => Promise<void>,
+            instance,
+          });
+        }
+      } catch {
+        // Ignorar
+      }
+    }
+  }
+
+  private discoverEventHandlers(): EventHandlerMetadata[] {
+    const handlers: EventHandlerMetadata[] = [];
+
+    for (const [, module] of this.modulesContainer.entries()) {
+      const providers = module.providers;
+
+      if (!providers) {
+        continue;
+      }
+
+      for (const [providerToken, providerDefinition] of providers.entries()) {
+        if (
+          typeof providerToken === 'string' &&
+          (providerToken.includes('ModuleRef') ||
+            providerToken.includes('Reflector') ||
+            providerToken.includes('ModulesContainer') ||
+            providerToken.includes('MetadataScanner') ||
+            providerToken.includes('QueueService') ||
+            providerToken.includes('QUEUE_OPTIONS'))
+        ) {
+          continue;
+        }
+
+        let instance: unknown;
+
+        try {
+          if (providerDefinition.instance) {
+            instance = providerDefinition.instance;
+          } else if (typeof providerToken === 'function') {
+            if (this.moduleRef) {
+              try {
+                instance = this.moduleRef.get(providerToken, { strict: false });
+              } catch {
+                try {
+                  const className = providerToken.name;
+                  if (className) {
+                    instance = this.moduleRef.get(className, { strict: false });
+                  }
+                } catch {
+                  try {
+                    instance = module.instance;
+                  } catch {
+                    continue;
+                  }
+                }
+              }
+            } else {
+              try {
+                instance = module.instance;
+              } catch {
+                continue;
+              }
+            }
+          } else {
+            try {
+              instance = module.instance;
+            } catch {
+              continue;
+            }
+          }
+        } catch {
+          continue;
+        }
+
+        if (!instance || typeof instance !== 'object') {
+          continue;
+        }
+
+        const prototype = Object.getPrototypeOf(instance);
+        if (!prototype) {
+          continue;
+        }
+
+        const methodNames = this.metadataScanner.getAllMethodNames(prototype);
+
+        for (const methodName of methodNames) {
+          try {
+            const method = prototype[methodName];
+            if (typeof method !== 'function') {
+              continue;
+            }
+
+            const metadata = this.reflector.get<QueueConsumerEventHandlerMeta>(QUEUE_CONSUMER_EVENT_HANDLER, method);
+
+            if (metadata) {
+              handlers.push({
+                meta: metadata,
+                handler: method,
+                instance,
+              });
+            }
+          } catch {
+            // Ignorar
+          }
+        }
+      }
+    }
+
+    return handlers;
   }
 
   private async startPolling(
@@ -221,11 +467,7 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
     consumer: OciQueueConsumerMapValues,
     handler: (message: OciQueueReceivedMessage | OciQueueReceivedMessage[]) => Promise<void>,
     isBatchHandler: boolean,
-    eventsMetadata: Array<{
-      meta: QueueConsumerEventHandlerMeta;
-      handler: (...args: unknown[]) => unknown;
-      instance: unknown;
-    }>,
+    eventHandlers: EventHandlerMetadata[],
     options: OciQueueConsumerOptions,
   ) {
     let consecutiveErrors = 0;
@@ -260,11 +502,21 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
           const receivedMessages: OciQueueReceivedMessage[] = new Array(messages.length);
           for (let i = 0; i < messages.length; i++) {
             const msg = messages[i];
+            const content = msg.content || '';
+            let decodedContent = '';
+            try {
+              decodedContent = Buffer.from(content, 'base64').toString('utf-8');
+            } catch {
+              decodedContent = content;
+            }
+
             receivedMessages[i] = {
               id: String(msg.id || ''),
               receiptHandle: msg.receipt || '',
-              content: msg.content || '',
+              content,
               metadata: msg.metadata?.customProperties,
+              Body: decodedContent,
+              MessageId: String(msg.id || ''),
             };
           }
 
@@ -296,7 +548,7 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
             await Promise.allSettled(deletePromises);
           } catch (error) {
             this.logger.warn(`Error processing messages for queue ${name}: ${error}`);
-            this.emitEvent(eventsMetadata, 'processing_error', error, receivedMessages);
+            this.emitEvent(eventHandlers, 'processing_error', error, receivedMessages);
 
             if (consumer.stopOnError) {
               consumer.isRunning = false;
@@ -339,7 +591,7 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
           consumer.consecutiveAuthErrors = 0;
           this.logger.warn(`Error polling queue ${name}: ${errorMessage}`);
         }
-        this.emitEvent(eventsMetadata, 'error', error, []);
+        this.emitEvent(eventHandlers, 'error', error, []);
       }
 
       if (consumer.isRunning && shouldContinue) {
@@ -360,16 +612,12 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
   }
 
   private emitEvent(
-    eventsMetadata: Array<{
-      meta: QueueConsumerEventHandlerMeta;
-      handler: (...args: unknown[]) => unknown;
-      instance: unknown;
-    }>,
+    eventHandlers: EventHandlerMetadata[],
     eventName: string,
     error: unknown,
     messages: OciQueueReceivedMessage[],
   ) {
-    const eventMetadata = eventsMetadata.find(({ meta }) => meta.eventName === eventName);
+    const eventMetadata = eventHandlers.find((h) => h.meta.eventName === eventName);
     if (eventMetadata) {
       try {
         const handler = eventMetadata.handler.bind(eventMetadata.instance);
@@ -382,263 +630,6 @@ export class QueueService implements OnModuleInit, OnApplicationBootstrap, OnMod
         this.logger.error(`Error in event handler: ${err}`);
       }
     }
-  }
-
-  public registerHandlerInstances(instances: unknown[]): void {
-    for (const instance of instances) {
-      if (instance && typeof instance === 'object') {
-        this.manualHandlerInstances.add(instance);
-      }
-    }
-    this.handlerDiscoveryCache.clear();
-  }
-
-  private providerMethodsWithMetaAtKey<T>(
-    metadataKey: symbol | string,
-  ): Array<{ meta: T; handler: (...args: unknown[]) => unknown; instance: unknown }> {
-    const cacheKey = String(metadataKey);
-    const cached = this.handlerDiscoveryCache.get(cacheKey);
-    if (cached) {
-      return cached as Array<{ meta: T; handler: (...args: unknown[]) => unknown; instance: unknown }>;
-    }
-
-    const results: Array<{ meta: T; handler: (...args: unknown[]) => unknown; instance: unknown }> = [];
-
-    for (const instance of this.manualHandlerInstances) {
-      if (!instance || typeof instance !== 'object') {
-        continue;
-      }
-
-      const prototype = Object.getPrototypeOf(instance);
-      if (!prototype) {
-        continue;
-      }
-
-      const methodNames = this.metadataScanner.getAllMethodNames(prototype);
-
-      for (const methodName of methodNames) {
-        try {
-          const method = prototype[methodName];
-          if (typeof method !== 'function') {
-            continue;
-          }
-
-          const metadata = this.reflector.get<T>(metadataKey, method);
-
-          if (metadata) {
-            results.push({
-              meta: metadata,
-              handler: method,
-              instance,
-            });
-          }
-        } catch {}
-      }
-    }
-
-    let containerToUse: ModulesContainer | undefined = this.modulesContainer;
-
-    if (this.moduleRef) {
-      try {
-        const appModulesContainer = this.moduleRef.get(ModulesContainer, { strict: false });
-        if (appModulesContainer && typeof appModulesContainer.entries === 'function') {
-          const moduleCount = appModulesContainer.size || Array.from(appModulesContainer.entries()).length;
-          if (moduleCount > 0) {
-            containerToUse = appModulesContainer;
-          }
-        }
-      } catch {
-        containerToUse = this.modulesContainer;
-      }
-    }
-
-    const isEmpty = !containerToUse || (containerToUse.size !== undefined && containerToUse.size === 0);
-
-    if (isEmpty && this.moduleRef) {
-      const commonHandlerNames = ['MessageHandler'];
-      for (const handlerName of commonHandlerNames) {
-        try {
-          const handlerInstance = this.moduleRef.get(handlerName as string, { strict: false });
-          if (handlerInstance && typeof handlerInstance === 'object') {
-            const prototype = Object.getPrototypeOf(handlerInstance);
-            if (prototype) {
-              const methodNames = this.metadataScanner.getAllMethodNames(prototype);
-              for (const methodName of methodNames) {
-                try {
-                  const method = prototype[methodName];
-                  if (typeof method !== 'function') {
-                    continue;
-                  }
-                  const metadata = this.reflector.get<T>(metadataKey, method);
-                  if (metadata) {
-                    results.push({
-                      meta: metadata,
-                      handler: method,
-                      instance: handlerInstance,
-                    });
-                  }
-                } catch {}
-              }
-            }
-          }
-        } catch {}
-      }
-    }
-
-    if (containerToUse && typeof containerToUse.entries === 'function') {
-      const processedTokens = new Set<InjectionToken>();
-
-      for (const [, module] of containerToUse.entries()) {
-        const providers = module.providers;
-
-        if (!providers) {
-          continue;
-        }
-
-        for (const [providerToken, provider] of providers.entries()) {
-          const tokenStr = String(providerToken);
-          let shouldSkip = false;
-          for (const skipped of this.skippedTokens) {
-            if (tokenStr.includes(skipped)) {
-              shouldSkip = true;
-              break;
-            }
-          }
-          if (shouldSkip) {
-            continue;
-          }
-
-          if (processedTokens.has(providerToken)) {
-            continue;
-          }
-          processedTokens.add(providerToken);
-
-          let instance: unknown;
-
-          try {
-            if (this.moduleRef) {
-              try {
-                instance = this.moduleRef.get(providerToken as Type<unknown>, { strict: false });
-                if (!instance) {
-                  const providerInternal = provider as { metatype?: Type<unknown> };
-                  if (providerInternal.metatype && typeof providerInternal.metatype === 'function') {
-                    instance = this.moduleRef.get(providerInternal.metatype, { strict: false });
-                  }
-                }
-              } catch {
-                if (provider.instance) {
-                  instance = provider.instance;
-                } else {
-                  const providerInternal = provider as { instance?: unknown };
-                  if (providerInternal.instance !== undefined && providerInternal.instance !== null) {
-                    instance = providerInternal.instance;
-                  }
-                }
-              }
-            } else {
-              if (provider.instance) {
-                instance = provider.instance;
-              } else {
-                const providerInternal = provider as { instance?: unknown };
-                if (providerInternal.instance !== undefined && providerInternal.instance !== null) {
-                  instance = providerInternal.instance;
-                }
-              }
-            }
-          } catch {
-            continue;
-          }
-
-          if (!instance || typeof instance !== 'object') {
-            continue;
-          }
-
-          const prototype = Object.getPrototypeOf(instance);
-          if (!prototype) {
-            continue;
-          }
-
-          const methodNames = this.metadataScanner.getAllMethodNames(prototype);
-
-          for (const methodName of methodNames) {
-            try {
-              const method = prototype[methodName];
-              if (typeof method !== 'function') {
-                continue;
-              }
-
-              const metadata = this.reflector.get<T>(metadataKey, method);
-
-              if (metadata) {
-                results.push({
-                  meta: metadata,
-                  handler: method,
-                  instance,
-                });
-              }
-            } catch {}
-          }
-        }
-      }
-    }
-
-    this.handlerDiscoveryCache.set(cacheKey, results);
-    return results;
-  }
-
-  public async rediscoverHandlers(): Promise<void> {
-    if (!this.modulesContainer || typeof this.modulesContainer.entries !== 'function') {
-      this.logger.warn('ModulesContainer not available for handler discovery');
-      return;
-    }
-
-    const messageHandlers = this.providerMethodsWithMetaAtKey<QueueMessageHandlerMeta>(QUEUE_CONSUMER_METHOD);
-    const eventHandlers =
-      this.providerMethodsWithMetaAtKey<QueueConsumerEventHandlerMeta>(QUEUE_CONSUMER_EVENT_HANDLER);
-
-    this.options.consumers?.forEach((options) => {
-      const { name, queueId, profile, region, pollingInterval = 1000, stopOnError = false } = options;
-
-      if (this.consumers.has(name) && this.consumers.get(name)?.isRunning) {
-        return;
-      }
-
-      const metadata = messageHandlers.find(({ meta }) => meta.name === name);
-      if (!metadata) {
-        this.logger.warn(`No metadata found for: ${name}`);
-        return;
-      }
-
-      const isBatchHandler = metadata.meta.batch === true;
-      const handler = metadata.handler.bind(metadata.instance);
-
-      let eventsMetadata = this.eventHandlersCache.get(name);
-      if (!eventsMetadata) {
-        eventsMetadata = eventHandlers.filter(({ meta }) => meta.name === name);
-        if (eventsMetadata.length > 0) {
-          this.eventHandlersCache.set(name, eventsMetadata);
-        }
-      }
-
-      const endpoint = options.endpoint || this.options.endpoint;
-      const queueClient = this.createQueueClient(
-        profile || this.options.profile,
-        region || this.options.region,
-        endpoint,
-      );
-
-      const consumer: OciQueueConsumerMapValues = {
-        queueId,
-        queueClient,
-        pollingInterval,
-        isRunning: true,
-        stopOnError,
-      };
-
-      this.startPolling(name, consumer, handler, isBatchHandler, eventsMetadata, options);
-
-      this.consumers.set(name, consumer);
-    });
   }
 
   public onModuleDestroy() {

@@ -85,6 +85,8 @@ export interface OciQueueReceivedMessage {
   receiptHandle: string;
   content: string;
   metadata?: Record<string, string>;
+  Body?: string;
+  MessageId?: string;
 }
 
 export type OciQueueConsumerEventHandlerMeta = QueueConsumerEventHandlerMeta;

@@ -5,7 +5,6 @@ import { QueueService } from './queue.service';
 import type { QueueModuleAsyncOptions, QueueModuleOptionsFactory, QueueOptions } from './queue.types';
 
 @Module({})
-// biome-ignore lint/complexity/noStaticOnlyClass: NestJS module pattern requires static methods
 export class QueueModule {
   public static register(options: QueueOptions): DynamicModule {
     const queueOptions: Provider = {
@@ -27,7 +26,14 @@ export class QueueModule {
         },
         {
           provide: ModulesContainer,
-          useFactory: () => new ModulesContainer(),
+          useFactory: () => {
+            const globalApp = (global as { __NEST_APP__?: { container?: { modules?: ModulesContainer } } })
+              .__NEST_APP__;
+            if (globalApp?.container?.modules) {
+              return globalApp.container.modules;
+            }
+            return new ModulesContainer();
+          },
         },
         {
           provide: MetadataScanner,
@@ -36,7 +42,7 @@ export class QueueModule {
         queueOptions,
         queueProvider,
       ],
-      exports: [queueProvider],
+      exports: [QueueService],
       global: true,
     };
   }
@@ -52,22 +58,29 @@ export class QueueModule {
       module: QueueModule,
       imports: [...(options.imports ?? [])],
       providers: [
-        ...asyncProviders,
         {
           provide: Reflector,
           useFactory: () => new Reflector(),
         },
         {
           provide: ModulesContainer,
-          useFactory: () => new ModulesContainer(),
+          useFactory: () => {
+            const globalApp = (global as { __NEST_APP__?: { container?: { modules?: ModulesContainer } } })
+              .__NEST_APP__;
+            if (globalApp?.container?.modules) {
+              return globalApp.container.modules;
+            }
+            return new ModulesContainer();
+          },
         },
         {
           provide: MetadataScanner,
           useFactory: () => new MetadataScanner(),
         },
+        ...asyncProviders,
         queueProvider,
       ],
-      exports: [queueProvider],
+      exports: [QueueService],
       global: true,
     };
   }
